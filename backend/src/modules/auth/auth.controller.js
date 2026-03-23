@@ -15,6 +15,7 @@ const {
   generateRefreshToken,
   verifyRefreshToken,
 } = require('../../utils/jwt');
+const { awardCoinsForNewUser } = require('../coins/coin.service');
 const {
   saveRefreshToken,
   verifyRefreshTokenExists,
@@ -164,6 +165,14 @@ const signupVerifyOTP = async (req, res) => {
 
     // Clean up signup session
     await deleteSignupSession(email);
+
+    // Credit KJN coins immediately after account creation.
+    // This is non-blocking: if coin credit fails, signup still succeeds.
+    try {
+      await awardCoinsForNewUser(user.id);
+    } catch (e) {
+      console.error('awardCoinsForNewUser error:', e);
+    }
 
     // Generate tokens
     const payload = { id: user.id, role: user.role };

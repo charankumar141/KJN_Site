@@ -124,4 +124,53 @@ const sendOrderConfirmationEmail = async (email, order) => {
   });
 };
 
-module.exports = { sendOTPEmail, sendOrderConfirmationEmail };
+// ── Abandoned cart reminder ───────────────────────────────
+
+const sendAbandonedCartReminderEmail = async (toEmail, { userName, items, cartUrl, whatsappUrl }) => {
+  const transporter = createTransporter();
+  const rows = (items || []).map(
+    (it) => `
+    <tr>
+      <td style="padding:10px;border-bottom:1px solid #f3f4f6;">${it.name}</td>
+      <td style="padding:10px;border-bottom:1px solid #f3f4f6;text-align:center;">${it.qty}</td>
+      <td style="padding:10px;border-bottom:1px solid #f3f4f6;text-align:right;">₹${it.lineTotal}</td>
+    </tr>`
+  ).join('');
+
+  await transporter.sendMail({
+    from: FROM,
+    to: toEmail,
+    subject: 'You left items in your cart — complete your order | KJN Shop',
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;background:#fff;">
+        <div style="background:#1B5E20;padding:20px;text-align:center;">
+          <img src="https://image.cdn.shpy.in/386933/KJNLogo-1767688579320.jpeg" alt="KJN Shop" style="height:40px;" />
+          <h1 style="color:white;margin:12px 0 0;font-size:20px;">Your cart is waiting</h1>
+        </div>
+        <div style="padding:24px;">
+          <p style="color:#374151;font-size:15px;">Hi <strong>${userName || 'there'}</strong>,</p>
+          <p style="color:#374151;font-size:15px;">You still have items in your cart. Complete your purchase before stock runs out.</p>
+          <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+            <thead>
+              <tr style="background:#f9fafb;">
+                <th style="padding:10px;text-align:left;font-size:12px;color:#6B7280;">Product</th>
+                <th style="padding:10px;text-align:center;font-size:12px;color:#6B7280;">Qty</th>
+                <th style="padding:10px;text-align:right;font-size:12px;color:#6B7280;">Line</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <div style="text-align:center;margin:24px 0;">
+            <a href="${cartUrl}" style="background:#1B5E20;color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;display:inline-block;">Return to cart</a>
+          </div>
+          <p style="color:#6B7280;font-size:13px;text-align:center;">Need help? <a href="${whatsappUrl}" style="color:#1B5E20;">Chat on WhatsApp</a></p>
+        </div>
+        <div style="background:#f9fafb;padding:16px;text-align:center;border-top:1px solid #e5e7eb;">
+          <p style="color:#9CA3AF;font-size:12px;margin:0;">KJN Trading Company · Mulakalacheruvu, Andhra Pradesh</p>
+        </div>
+      </div>
+    `,
+  });
+};
+
+module.exports = { sendOTPEmail, sendOrderConfirmationEmail, sendAbandonedCartReminderEmail };

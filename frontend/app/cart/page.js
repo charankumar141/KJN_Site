@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   Minus, Plus, ShoppingBag, Tag,
   ArrowRight, Truck, X, ChevronRight, Package, ShieldCheck,
-  Gift, ChevronDown, ChevronUp, Copy, Check, Zap
+  Gift, ChevronDown, ChevronUp, Copy, Check, Zap, Coins
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useCartStore from '@/store/useCartStore';
@@ -432,6 +432,13 @@ export default function CartPage() {
                   </div>
                 )}
 
+                {cart.coinDiscount > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-emerald-600 font-semibold">KJN Coins Discount</span>
+                    <span className="font-bold text-emerald-600">-{RS}{fmt(cart.coinDiscount)}</span>
+                  </div>
+                )}
+
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600 font-semibold">Delivery</span>
                   <span className={`font-bold ${cart.shippingCharge === 0 ? 'text-green-600' : 'text-gray-900'}`}>
@@ -451,10 +458,10 @@ export default function CartPage() {
                   </span>
                 </div>
 
-                {cart.couponDiscount > 0 && (
+                {(cart.couponDiscount > 0 || cart.coinDiscount > 0) && (
                   <div className="bg-green-50 rounded-xl px-4 py-2.5 text-center">
                     <p className="text-sm font-extrabold text-green-700">
-                      You save {RS}{fmt(cart.couponDiscount)} on this order!
+                      You save {RS}{fmt((cart.couponDiscount || 0) + (cart.coinDiscount || 0))} on this order!
                     </p>
                   </div>
                 )}

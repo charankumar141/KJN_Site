@@ -47,6 +47,18 @@ const useCartStore = create((set, get) => ({
     return res.data;
   },
 
+  applyCoins: async (coinsToRedeem) => {
+    const res = await api.post('/cart/coins', { coinsToRedeem });
+    set({ cart: res.data.data });
+    return res.data;
+  },
+
+  removeCoins: async () => {
+    const res = await api.delete('/cart/coins');
+    set({ cart: res.data.data });
+    return res.data;
+  },
+
   removeCoupon: async () => {
     const res = await api.delete('/cart/coupon');
     set({ cart: res.data.data });

@@ -60,6 +60,12 @@ const placeOrder = async (req, res) => {
       const itemTotal = parseFloat(item.priceAtAdd) * item.quantity;
       subtotal += itemTotal;
 
+      const gstP = parseFloat(item.product.gstPercent || 18);
+      const cessP = parseFloat(item.product.cessPercent || 0);
+      const gstType = item.product.gstType || 'IGST';
+      const codAdvanceP = paymentMethod === 'COD' ? parseFloat(item.product.codAdvancePercent || 0) : 0;
+      const advanceAmountItem = (itemTotal * codAdvanceP) / 100;
+
       orderItems.push({
         productId: item.productId,
         variantId: item.variantId || null,
@@ -69,8 +75,11 @@ const placeOrder = async (req, res) => {
         quantity: item.quantity,
         unitPrice: parseFloat(item.priceAtAdd),
         mrp: parseFloat(item.product.mrp),
-        gstPercent: parseFloat(item.product.gstPercent),
+        gstType,
+        gstPercent: gstP,
+        cessPercent: cessP,
         totalPrice: itemTotal,
+        advanceAmount: advanceAmountItem,
       });
     }
 
@@ -88,7 +97,23 @@ const placeOrder = async (req, res) => {
       }
     }
 
+    // KJN coins redemption (1 coin = 1 rupee)
+    const coinsUsedRequested = parseInt(cart.coinsUsed ?? 0, 10) || 0;
+    let coinDiscount = 0;
+    if (coinsUsedRequested > 0) {
+      const wallet = await prisma.userCoinWallet.findUnique({ where: { userId } });
+      const coinBalance = parseInt(wallet?.balance ?? 0, 10) || 0;
+      const maxEligible = Math.max(0, subtotal - discountAmount);
+      coinDiscount = Math.min(coinsUsedRequested, coinBalance, Math.floor(maxEligible));
+      if (coinDiscount > 0) discountAmount += coinDiscount;
+    }
+
     const gstAmount = orderItems.reduce((a, b) => a + (b.totalPrice * b.gstPercent) / (100 + b.gstPercent), 0);
+    const cessAmount = orderItems.reduce((a, b) => {
+      const taxable = b.totalPrice / (1 + (b.gstPercent + b.cessPercent) / 100);
+      return a + (taxable * (b.cessPercent || 0)) / 100;
+    }, 0);
+    const advanceAmount = orderItems.reduce((a, b) => a + (b.advanceAmount || 0), 0);
     const shippingCharge = subtotal >= 500 ? 0 : 99;
 
     // Prepaid discount (1.5%)
@@ -100,12 +125,14 @@ const placeOrder = async (req, res) => {
 
     const totalAmount = subtotal - discountAmount + shippingCharge;
 
+    const generatedOrderNumber = generateOrderNumber();
+
     // Create order with transaction
     const order = await prisma.$transaction(async (tx) => {
       // Create order
       const newOrder = await tx.order.create({
         data: {
-          orderNumber: generateOrderNumber(),
+          orderNumber: generatedOrderNumber,
           userId,
           shippingAddressId,
           paymentMethod,
@@ -114,6 +141,8 @@ const placeOrder = async (req, res) => {
           subtotal: parseFloat(subtotal.toFixed(2)),
           discountAmount: parseFloat(discountAmount.toFixed(2)),
           gstAmount: parseFloat(gstAmount.toFixed(2)),
+          cessAmount: parseFloat(cessAmount.toFixed(2)),
+          advanceAmount: parseFloat(advanceAmount.toFixed(2)),
           shippingCharge: parseFloat(shippingCharge.toFixed(2)),
           totalAmount: parseFloat(totalAmount.toFixed(2)),
           status: paymentMethod === 'COD' ? 'CONFIRMED' : 'PENDING',
@@ -122,6 +151,24 @@ const placeOrder = async (req, res) => {
         },
         include: { items: true, shippingAddress: true },
       });
+
+      // Deduct coins after order creation but before stock decrement (still atomic)
+      if (coinDiscount > 0) {
+        await tx.userCoinWallet.update({
+          where: { userId },
+          data: { balance: { decrement: coinDiscount } },
+        });
+        await tx.coinTransaction.create({
+          data: {
+            userId,
+            amount: -coinDiscount,
+            type: 'REDEEM',
+            source: 'SYSTEM',
+            reason: 'Redeemed at checkout',
+            meta: { coinsUsedRequested, orderNumber: generatedOrderNumber },
+          },
+        });
+      }
 
       // Reduce stock for each product
       for (const item of cart.items) {
@@ -142,7 +189,7 @@ const placeOrder = async (req, res) => {
 
       // Clear cart
       await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
-      await tx.cart.update({ where: { id: cart.id }, data: { couponCode: null } });
+      await tx.cart.update({ where: { id: cart.id }, data: { couponCode: null, coinsUsed: 0 } });
 
       return newOrder;
     });

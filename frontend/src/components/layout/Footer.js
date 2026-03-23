@@ -1,9 +1,18 @@
 'use client';
 
 import Link from 'next/link';
-import { Phone, Mail, MapPin, Youtube, Twitter, Facebook, Instagram, Headphones } from 'lucide-react';
+import { Phone, Mail, MapPin, Youtube, Twitter, Facebook, Instagram, Headphones, ExternalLink } from 'lucide-react';
 
 export default function Footer() {
+  const mapEmbedUrl =
+    typeof process !== 'undefined' && process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_URL
+      ? process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_URL
+      : null;
+  const mapLinkUrl =
+    typeof process !== 'undefined' && process.env.NEXT_PUBLIC_GOOGLE_MAPS_LINK_URL
+      ? process.env.NEXT_PUBLIC_GOOGLE_MAPS_LINK_URL
+      : 'https://www.google.com/maps/search/?api=1&query=KJN+Trading+Mulakalacheruvu';
+
   return (
     <footer className="bg-[#0F2412] text-gray-300 mt-auto">
       {/* Top strip with logo and social icons */}
@@ -60,6 +69,14 @@ export default function Footer() {
               </a>
               <a href="mailto:info@shopatkjn.com" className="flex items-center gap-2.5 text-xs hover:text-green-400 transition-colors">
                 <Mail className="w-4 h-4 text-green-400" /> info@shopatkjn.com
+              </a>
+              <a
+                href={mapLinkUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-xs text-green-300 hover:text-green-400 transition-colors mt-1"
+              >
+                <ExternalLink className="w-3.5 h-3.5" /> Open in Google Maps
               </a>
             </div>
           </div>
@@ -152,6 +169,25 @@ export default function Footer() {
           </div>
         </div>
       </div>
+
+      {/* Store map (optional embed from NEXT_PUBLIC_GOOGLE_MAPS_EMBED_URL) */}
+      {mapEmbedUrl && (
+        <div className="border-t border-white/10">
+          <div className="container mx-auto px-4 py-6">
+            <h4 className="text-white font-heading font-bold text-sm mb-3">Find us on the map</h4>
+            <div className="rounded-xl overflow-hidden border border-white/10 aspect-[21/9] min-h-[200px] max-h-[320px] bg-black/20">
+              <iframe
+                title="KJN Shop location"
+                src={mapEmbedUrl}
+                className="w-full h-full min-h-[200px] border-0"
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+                allowFullScreen
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bottom bar */}
       <div className="border-t border-white/10 py-4">

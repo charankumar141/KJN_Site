@@ -88,6 +88,7 @@ async function getServiceability(pincode, weightGrams, paymentMode = 'PREPAID') 
   const client = getClient();
   const res = await client.get('/serviceability', {
     params: {
+      ...(process.env.SHIPMOZO_PICKUP_PINCODE ? { origin_pincode: process.env.SHIPMOZO_PICKUP_PINCODE } : {}),
       destination_pincode: pincode,
       weight: weightGrams,
       payment_type: paymentMode === 'COD' ? 'COD' : 'Prepaid',

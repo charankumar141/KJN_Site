@@ -28,7 +28,7 @@ const protect = (req, res, next) => {
   }
 };
 
-// Optional auth — populates req.user if a valid token is present, but never rejects
+// Optional auth â€” populates req.user if a valid token is present, but never rejects
 const optionalProtect = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -38,14 +38,14 @@ const optionalProtect = (req, res, next) => {
       if (decoded) req.user = decoded;
     }
   } catch (_) {
-    // ignore — guest request
+    // ignore â€” guest request
   }
   next();
 };
 
-// Admin only middleware
+// Admin only middleware (matches admin UI: ADMIN + STAFF)
 const adminOnly = (req, res, next) => {
-  if (req.user.role !== 'ADMIN') {
+  if (req.user.role !== 'ADMIN' && req.user.role !== 'STAFF') {
     return res.status(403).json({
       success: false,
       message: 'Access denied. Admins only.',
