@@ -31,32 +31,49 @@ const getOrCreateCart = async (userId, sessionId) => {
   throw new Error('userId or sessionId required');
 };
 
-// Format cart response with totals
-const formatCart = (cart, couponDiscount = 0) => {
-const items = cart.items.map((item) => ({
-  id: item.id,
-  productId: item.productId,
-  name: item.product.name,
-  slug: item.product.slug,
-  image: item.product.images?.[0]?.image || item.product.image || null,
-  variant: item.variant ? `${item.variant.variantName}: ${item.variant.variantValue}` : null,
-  variantId: item.variantId,
-  quantity: item.quantity,
-  unitPrice: parseFloat(item.priceAtAdd),
-  mrp: parseFloat(item.product.mrp),
-  sellingPrice: parseFloat(item.product.sellingPrice),
-  isFlashSalePrice: parseFloat(item.priceAtAdd) < parseFloat(item.product.sellingPrice),
-  totalPrice: parseFloat(item.priceAtAdd) * item.quantity,
-  gstPercent: parseFloat(item.product.gstPercent || 18),
-  inStock: item.product.stockQuantity >= item.quantity,
-}));
+// Format cart response with totals (GST + CESS, COD advance amount, coin redemption)
+const formatCart = (cart, couponDiscount = 0, coinDiscount = 0, coinBalance = 0) => {
+const items = cart.items.map((item) => {
+  const gstP = parseFloat(item.product.gstPercent || 18);
+  const cessP = parseFloat(item.product.cessPercent || 0);
+  const codAdvanceP = parseFloat(item.product.codAdvancePercent || 0);
+  const totalPrice = parseFloat(item.priceAtAdd) * item.quantity;
+  const taxable = totalPrice / (1 + (gstP + cessP) / 100);
+  const gstAmountItem = (taxable * gstP) / 100;
+  const cessAmountItem = (taxable * cessP) / 100;
+  const advanceAmountItem = codAdvanceP > 0 ? (totalPrice * codAdvanceP) / 100 : 0;
+  const allowedPaymentMethods = item.product.allowedPaymentMethods || ['COD', 'ONLINE'];
+  return {
+    id: item.id,
+    productId: item.productId,
+    name: item.product.name,
+    slug: item.product.slug,
+    image: item.product.images?.[0]?.image || item.product.image || null,
+    variant: item.variant ? `${item.variant.variantName}: ${item.variant.variantValue}` : null,
+    variantId: item.variantId,
+    quantity: item.quantity,
+    unitPrice: parseFloat(item.priceAtAdd),
+    mrp: parseFloat(item.product.mrp),
+    sellingPrice: parseFloat(item.product.sellingPrice),
+    isFlashSalePrice: parseFloat(item.priceAtAdd) < parseFloat(item.product.sellingPrice),
+    totalPrice: parseFloat(totalPrice.toFixed(2)),
+    gstPercent: gstP,
+    cessPercent: cessP,
+    gstAmount: parseFloat(gstAmountItem.toFixed(2)),
+    cessAmount: parseFloat(cessAmountItem.toFixed(2)),
+    codAdvancePercent: codAdvanceP,
+    advanceAmount: parseFloat(advanceAmountItem.toFixed(2)),
+    allowedPaymentMethods: Array.isArray(allowedPaymentMethods) ? allowedPaymentMethods : ['COD', 'ONLINE'],
+    inStock: item.product.stockQuantity >= item.quantity,
+  };
+});
 
 const subtotal = items.reduce((a, b) => a + b.totalPrice, 0);
-const gstAmount = items.reduce((a, b) => {
-  return a + (b.totalPrice * b.gstPercent) / (100 + b.gstPercent);
-}, 0);
+const gstAmount = items.reduce((a, b) => a + (b.gstAmount || 0), 0);
+const cessAmount = items.reduce((a, b) => a + (b.cessAmount || 0), 0);
+const advanceAmount = items.reduce((a, b) => a + (b.advanceAmount || 0), 0);
   const shippingCharge = subtotal >= 500 ? 0 : 99;
-  const totalAmount = subtotal - couponDiscount + shippingCharge;
+  const totalAmount = subtotal - couponDiscount - coinDiscount + shippingCharge;
 
   return {
     id: cart.id,
@@ -64,13 +81,39 @@ const gstAmount = items.reduce((a, b) => {
     couponCode: cart.couponCode,
     subtotal: parseFloat(subtotal.toFixed(2)),
     couponDiscount: parseFloat(couponDiscount.toFixed(2)),
+    coinsUsed: parseInt(cart.coinsUsed ?? 0, 10) || 0,
+    coinBalance: parseInt(coinBalance ?? 0, 10) || 0,
+    coinDiscount: parseFloat(coinDiscount.toFixed(2)),
     gstAmount: parseFloat(gstAmount.toFixed(2)),
+    cessAmount: parseFloat(cessAmount.toFixed(2)),
+    advanceAmount: parseFloat(advanceAmount.toFixed(2)),
     shippingCharge,
     totalAmount: parseFloat(totalAmount.toFixed(2)),
     totalItems: items.reduce((a, b) => a + b.quantity, 0),
     freeShippingEligible: subtotal >= 500,
     freeShippingRemaining: subtotal < 500 ? parseFloat((500 - subtotal).toFixed(2)) : 0,
   };
+};
+
+// KJN coins: 1 coin = 1 rupee for redemption mapping.
+// coinDiscount is capped by:
+// - wallet balance
+// - cart.coinsUsed requested by customer
+// - max eligible discount value (subtotal - couponDiscount)
+const calcCoinRedemption = async (cart, userId, couponDiscount = 0) => {
+  const coinsUsed = parseInt(cart.coinsUsed ?? 0, 10) || 0;
+  if (!userId || coinsUsed <= 0) return { coinDiscount: 0, coinBalance: 0 };
+
+  const wallet = await prisma.userCoinWallet.findUnique({ where: { userId } });
+  const coinBalance = parseInt(wallet?.balance ?? 0, 10) || 0;
+  if (coinBalance <= 0) return { coinDiscount: 0, coinBalance: 0 };
+
+  const subtotal = cart.items.reduce((a, b) => a + parseFloat(b.priceAtAdd) * b.quantity, 0);
+  const maxEligible = Math.max(0, subtotal - parseFloat(couponDiscount || 0));
+
+  // Coins are integer rupees, so floor the eligible amount.
+  const coinDiscount = Math.min(coinsUsed, coinBalance, Math.floor(maxEligible));
+  return { coinDiscount, coinBalance };
 };
 
 const calcCouponDiscount = async (cart) => {
@@ -102,7 +145,8 @@ const getCart = async (req, res) => {
 
     const cart = await getOrCreateCart(userId, sessionId);
     const discount = await calcCouponDiscount(cart);
-    return res.status(200).json({ success: true, data: formatCart(cart, discount) });
+    const { coinDiscount, coinBalance } = await calcCoinRedemption(cart, userId, discount);
+    return res.status(200).json({ success: true, data: formatCart(cart, discount, coinDiscount, coinBalance) });
   } catch (error) {
     console.error('getCart error:', error);
     return res.status(500).json({ success: false, message: error.message || 'Server error' });
@@ -164,7 +208,8 @@ const addToCart = async (req, res) => {
 
     const updatedCart = await getOrCreateCart(userId, sessionId);
     const discount = await calcCouponDiscount(updatedCart);
-    return res.status(200).json({ success: true, message: 'Added to cart', data: formatCart(updatedCart, discount) });
+    const { coinDiscount, coinBalance } = await calcCoinRedemption(updatedCart, userId, discount);
+    return res.status(200).json({ success: true, message: 'Added to cart', data: formatCart(updatedCart, discount, coinDiscount, coinBalance) });
   } catch (error) {
     console.error('addToCart error:', error);
     return res.status(500).json({ success: false, message: error.message || 'Server error' });
@@ -188,7 +233,8 @@ const updateCartItem = async (req, res) => {
 
     const updatedCart = await getOrCreateCart(userId, sessionId);
     const discount = await calcCouponDiscount(updatedCart);
-    return res.status(200).json({ success: true, data: formatCart(updatedCart, discount) });
+    const { coinDiscount, coinBalance } = await calcCoinRedemption(updatedCart, userId, discount);
+    return res.status(200).json({ success: true, data: formatCart(updatedCart, discount, coinDiscount, coinBalance) });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -204,7 +250,8 @@ const removeCartItem = async (req, res) => {
 
     const updatedCart2 = await getOrCreateCart(userId, sessionId);
     const discount2 = await calcCouponDiscount(updatedCart2);
-    return res.status(200).json({ success: true, message: 'Item removed', data: formatCart(updatedCart2, discount2) });
+    const { coinDiscount, coinBalance } = await calcCoinRedemption(updatedCart2, userId, discount2);
+    return res.status(200).json({ success: true, message: 'Item removed', data: formatCart(updatedCart2, discount2, coinDiscount, coinBalance) });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -247,10 +294,11 @@ const applyCoupon = async (req, res) => {
     await prisma.cart.update({ where: { id: cart.id }, data: { couponCode: coupon.code } });
 
     const updatedCart = await getOrCreateCart(userId, null);
+    const { coinDiscount, coinBalance } = await calcCoinRedemption(updatedCart, userId, discount);
     return res.status(200).json({
       success: true,
       message: `Coupon applied! You save ₹${discount.toFixed(2)}`,
-      data: formatCart(updatedCart, discount),
+      data: formatCart(updatedCart, discount, coinDiscount, coinBalance),
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Server error' });
@@ -265,7 +313,75 @@ const removeCoupon = async (req, res) => {
 
     await prisma.cart.update({ where: { id: cart.id }, data: { couponCode: null } });
     const updatedCart = await getOrCreateCart(userId, null);
-    return res.status(200).json({ success: true, message: 'Coupon removed', data: formatCart(updatedCart, 0) });
+    const { coinDiscount, coinBalance } = await calcCoinRedemption(updatedCart, userId, 0);
+    return res.status(200).json({ success: true, message: 'Coupon removed', data: formatCart(updatedCart, 0, coinDiscount, coinBalance) });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────
+// KJN COINS redemption
+// POST /cart/coins { coinsToRedeem }
+// DELETE /cart/coins
+// ─────────────────────────────────────────────
+
+const applyCoins = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: 'Login required to use coins' });
+
+    const { coinsToRedeem } = req.body;
+    const requested = parseInt(coinsToRedeem, 10);
+    if (!Number.isFinite(requested) || requested < 0) {
+      return res.status(400).json({ success: false, message: 'coinsToRedeem must be a non-negative integer' });
+    }
+
+    const cart = await getOrCreateCart(userId, null);
+    const couponDiscount = await calcCouponDiscount(cart);
+    const wallet = await prisma.userCoinWallet.findUnique({ where: { userId } });
+    const coinBalance = parseInt(wallet?.balance ?? 0, 10) || 0;
+
+    // eligible discount value is limited by (subtotal - couponDiscount)
+    const subtotal = cart.items.reduce((a, b) => a + parseFloat(b.priceAtAdd) * b.quantity, 0);
+    const maxEligible = Math.max(0, subtotal - couponDiscount);
+    const actual = Math.min(requested, coinBalance, Math.floor(maxEligible));
+
+    await prisma.cart.update({
+      where: { id: cart.id },
+      data: { coinsUsed: actual },
+    });
+
+    const updatedCart = await getOrCreateCart(userId, null);
+    const { coinDiscount, coinBalance: balanceAfter } = await calcCoinRedemption(updatedCart, userId, couponDiscount);
+    return res.status(200).json({
+      success: true,
+      message: actual > 0 ? `Coins applied! You save ₹${actual}` : 'Coins removed',
+      data: formatCart(updatedCart, couponDiscount, coinDiscount, balanceAfter),
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+const removeCoins = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: 'Login required to remove coins' });
+
+    const cart = await prisma.cart.findUnique({ where: { userId } });
+    if (!cart) return res.status(404).json({ success: false, message: 'Cart not found' });
+
+    await prisma.cart.update({ where: { id: cart.id }, data: { coinsUsed: 0 } });
+    const updatedCart = await getOrCreateCart(userId, null);
+    const couponDiscount = await calcCouponDiscount(updatedCart);
+    const { coinDiscount, coinBalance } = await calcCoinRedemption(updatedCart, userId, couponDiscount);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Coins removed',
+      data: formatCart(updatedCart, couponDiscount, coinDiscount, coinBalance),
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -303,10 +419,38 @@ const mergeCart = async (req, res) => {
     await prisma.cart.delete({ where: { id: guestCart.id } });
     const mergedCart = await getOrCreateCart(userId, null);
     const discount = await calcCouponDiscount(mergedCart);
-    return res.status(200).json({ success: true, message: 'Cart merged', data: formatCart(mergedCart, discount) });
+    const { coinDiscount, coinBalance } = await calcCoinRedemption(mergedCart, userId, discount);
+    return res.status(200).json({ success: true, message: 'Cart merged', data: formatCart(mergedCart, discount, coinDiscount, coinBalance) });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
-module.exports = { getCart, addToCart, updateCartItem, removeCartItem, applyCoupon, removeCoupon, mergeCart };
+// Save checkout address/contact snapshot for abandoned cart reporting (admin sees user + product + address)
+const updateCheckoutSnapshot = async (req, res) => {
+  try {
+    const userId = req.user?.id || null;
+    const sessionId = req.headers['x-session-id'] || null;
+    if (!userId && !sessionId) return res.status(400).json({ success: false, message: 'Session required' });
+
+    const snapshot = req.body;
+    const allowed = ['name', 'phone', 'line1', 'line2', 'city', 'state', 'pincode'];
+    const payload = {};
+    allowed.forEach((k) => {
+      if (snapshot[k] != null) payload[k] = String(snapshot[k]).trim();
+    });
+    if (Object.keys(payload).length === 0) return res.status(400).json({ success: false, message: 'No address fields provided' });
+
+    const cart = await getOrCreateCart(userId, sessionId);
+    await prisma.cart.update({
+      where: { id: cart.id },
+      data: { checkoutSnapshot: payload },
+    });
+    return res.status(200).json({ success: true, message: 'Checkout snapshot updated' });
+  } catch (error) {
+    console.error('updateCheckoutSnapshot error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+module.exports = { getCart, addToCart, updateCartItem, removeCartItem, applyCoupon, removeCoupon, applyCoins, removeCoins, mergeCart, updateCheckoutSnapshot };

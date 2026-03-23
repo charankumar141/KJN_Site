@@ -4,7 +4,7 @@ import Link from 'next/link';
 import {
   Package, ShoppingBag, Users, TrendingUp,
   TrendingDown, AlertCircle, Clock, DollarSign,
-  Zap, ArrowUpRight, Eye, ChevronRight
+  Zap, ArrowUpRight, ChevronRight
 } from 'lucide-react';
 import api from '@/lib/api';
 import useAuthStore from '@/store/useAuthStore';
@@ -18,9 +18,11 @@ function AnimatedNumber({ value, prefix = '', duration = 1200 }) {
   const ref = useRef(null);
 
   useEffect(() => {
-    let start = 0;
     const end = typeof value === 'number' ? value : parseInt(value) || 0;
-    if (end === 0) { setDisplay(0); return; }
+    if (end === 0) {
+      ref.current = requestAnimationFrame(() => setDisplay(0));
+      return () => cancelAnimationFrame(ref.current);
+    }
     const startTime = performance.now();
     const animate = (now) => {
       const progress = Math.min((now - startTime) / duration, 1);
@@ -122,6 +124,17 @@ export default function AdminDashboard() {
       bgLight: 'bg-red-50',
       description: 'Need restocking',
       link: '/admin/products'
+    },
+    {
+      title: 'Abandoned Carts',
+      value: stats.carts?.abandoned || 0,
+      trend: '+0%',
+      trendUp: true,
+      icon: ShoppingBag,
+      gradient: 'from-slate-600 to-slate-800',
+      bgLight: 'bg-slate-50',
+      description: 'Users left without buying',
+      link: '/admin/abandoned-carts'
     },
   ];
 

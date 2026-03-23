@@ -16,7 +16,7 @@ import { useState, useRef, useCallback } from 'react';
 import { Upload, X, Star, Loader, AlertCircle, GripVertical } from 'lucide-react';
 import api from '@/lib/api';
 
-export default function MultiImageUploader({ images = [], onChange, maxImages = 8 }) {
+export default function MultiImageUploader({ images = [], onChange, maxImages = 6 }) {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({});
   const [error, setError] = useState('');
@@ -61,7 +61,7 @@ export default function MultiImageUploader({ images = [], onChange, maxImages = 
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
-      const uploaded = res.data.data; // array of { url, filename, width, height, sizeKB }
+      const uploaded = res.data.data; // backend returns { image, thumbnail } per file (or legacy { url })
 
       // Replace temp previews with real URLs
       const finalImages = newImages.map(img => {
@@ -69,7 +69,8 @@ export default function MultiImageUploader({ images = [], onChange, maxImages = 
         const tempIdx = previews.findIndex(p => p.id === img.id);
         if (tempIdx === -1 || !uploaded[tempIdx]) return img;
         URL.revokeObjectURL(img.url);
-        return { ...img, url: uploaded[tempIdx].url, isUploading: false, id: `img-${Date.now()}-${tempIdx}` };
+        const serverUrl = uploaded[tempIdx].url || uploaded[tempIdx].image;
+        return { ...img, url: serverUrl, isUploading: false, id: `img-${Date.now()}-${tempIdx}` };
       });
 
       onChange(finalImages);

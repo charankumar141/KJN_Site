@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Package, ShoppingBag, Users, Tag, ImageIcon,
-  FileText, Menu, LogOut, Layers, Zap, Bell, TrendingUp,
+  FileText, Menu, LogOut, Layers, Zap, Bell, TrendingUp, BarChart3,
   ChevronDown, Boxes, X, ChevronRight, Star, MessageSquare, RotateCcw, CreditCard
 } from 'lucide-react';
 import useAuthStore from '@/store/useAuthStore';
@@ -29,9 +29,14 @@ const navItems = [
       { label: 'Flash Sales', href: '/admin/flash-sales', icon: Zap        },
       { label: 'Coupons',     href: '/admin/coupons',     icon: Tag        },
       { label: 'Revenue',     href: '/admin/revenue',     icon: TrendingUp },
+      { label: 'Revenue by Category', href: '/admin/revenue-by-category', icon: BarChart3 },
+      { label: 'Reports (CSV)', href: '/admin/reports', icon: FileText },
+      { label: 'Abandoned Carts', href: '/admin/abandoned-carts', icon: ShoppingBag },
       { label: 'Payments',    href: '/admin/payments',    icon: CreditCard },
     ]
   },
+  { label: 'Pincode Delivery', href: '/admin/pincode-delivery', icon: Package },
+  { label: 'KJN Coins', href: '/admin/coins', icon: CreditCard },
   { label: 'Customers', href: '/admin/customers', icon: Users },
   { label: 'Reviews', href: '/admin/reviews', icon: Star },
   { label: 'Contact Messages', href: '/admin/contact-messages', icon: MessageSquare },

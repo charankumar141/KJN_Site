@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const { sendAbandonedCartReminderEmail } = require('../../utils/email');
 
 const getDashboardStats = async (req, res) => {
   try {
@@ -15,6 +16,7 @@ const getDashboardStats = async (req, res) => {
       pendingOrders, processingOrders,
       totalProducts, lowStockProducts,
       recentOrders, topProducts,
+      abandonedCarts,
     ] = await Promise.all([
       prisma.order.count(),
       prisma.order.count({ where: { createdAt: { gte: startOfDay } } }),
@@ -54,6 +56,8 @@ const getDashboardStats = async (req, res) => {
         orderBy: { _sum: { quantity: 'desc' } },
         take: 5,
       }),
+
+      prisma.cart.count({ where: { items: { some: {} } } }),
     ]);
 
     // Get top product names
@@ -96,6 +100,9 @@ const getDashboardStats = async (req, res) => {
         products: {
           total: totalProducts,
           lowStock: lowStockProducts,
+        },
+        carts: {
+          abandoned: abandonedCarts,
         },
         recentOrders,
         topProducts: topProductDetails,
@@ -351,8 +358,16 @@ const getAdminProducts = async (req, res) => {
       categoryId: p.categoryId,
       brandId: p.brandId,
       gstPercent: parseFloat(p.gstPercent),
+      cessPercent: parseFloat(p.cessPercent || 0),
+      gstType: p.gstType || 'IGST',
+      allowedPaymentMethods: p.allowedPaymentMethods || ['COD', 'ONLINE'],
+      codAdvancePercent: parseFloat(p.codAdvancePercent || 0),
+      googleMerchantCentre: !!p.googleMerchantCentre,
+      metaTitle: p.metaTitle,
+      metaDescription: p.metaDescription,
       description: p.description,
       shortDescription: p.shortDescription,
+      specifications: p.specifications,
     }));
 
     return res.status(200).json({
@@ -371,4 +386,202 @@ const getAdminProducts = async (req, res) => {
   }
 };
 
-module.exports = { getDashboardStats, getAllUsers, getUserDetail, getLowStockProducts, updateStock, getRevenueReport, getAdminProducts };
+// Revenue report by category (for admin reports)
+const getRevenueReportByCategory = async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const fromDate = from ? new Date(from) : new Date(new Date().setDate(1));
+    const toDate = to ? new Date(to) : new Date();
+
+    const orderItems = await prisma.orderItem.findMany({
+      where: {
+        order: {
+          status: { notIn: ['CANCELLED'] },
+          createdAt: { gte: fromDate, lte: toDate },
+        },
+      },
+      include: {
+        product: { include: { category: { select: { id: true, name: true, slug: true } } } },
+        order: { select: { createdAt: true, totalAmount: true } },
+      },
+    });
+
+    const byCategory = {};
+    orderItems.forEach((oi) => {
+      const cat = oi.product?.category;
+      const key = cat?.id || 'uncategorized';
+      const name = cat?.name || 'Uncategorized';
+      const slug = cat?.slug || 'uncategorized';
+      if (!byCategory[key]) {
+        byCategory[key] = { categoryId: key, categoryName: name, categorySlug: slug, revenue: 0, quantity: 0, orderCount: new Set() };
+      }
+      byCategory[key].revenue += parseFloat(oi.totalPrice);
+      byCategory[key].quantity += oi.quantity;
+      byCategory[key].orderCount.add(oi.orderId);
+    });
+
+    const data = Object.values(byCategory).map((c) => ({
+      categoryId: c.categoryId,
+      categoryName: c.categoryName,
+      categorySlug: c.categorySlug,
+      revenue: parseFloat(c.revenue.toFixed(2)),
+      quantity: c.quantity,
+      orderCount: c.orderCount.size,
+    })).sort((a, b) => b.revenue - a.revenue);
+
+    return res.status(200).json({
+      success: true,
+      data,
+      from: fromDate,
+      to: toDate,
+    });
+  } catch (error) {
+    console.error('getRevenueReportByCategory error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Abandoned carts: users who added to cart but did not place order (with user + product + address details)
+const getAbandonedCarts = async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const carts = await prisma.cart.findMany({
+      where: { items: { some: {} } },
+      skip,
+      take: parseInt(limit),
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        user: {
+          select: { id: true, name: true, email: true, phone: true },
+        },
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+                sku: true,
+                sellingPrice: true,
+                mrp: true,
+                image: true,
+                images: { take: 1, select: { image: true } },
+              },
+            },
+            variant: true,
+          },
+        },
+      },
+    });
+
+    const data = carts.map((cart) => ({
+      id: cart.id,
+      userId: cart.userId,
+      sessionId: cart.sessionId,
+      user: cart.user
+        ? {
+            name: cart.user.name,
+            email: cart.user.email,
+            phone: cart.user.phone,
+          }
+        : null,
+      checkoutSnapshot: cart.checkoutSnapshot,
+      items: cart.items.map((i) => ({
+        productId: i.productId,
+        productName: i.product.name,
+        slug: i.product.slug,
+        sku: i.product.sku,
+        quantity: i.quantity,
+        priceAtAdd: parseFloat(i.priceAtAdd),
+        sellingPrice: parseFloat(i.product.sellingPrice),
+        image: i.product.images?.[0]?.image || i.product.image,
+        variant: i.variant ? `${i.variant.variantName}: ${i.variant.variantValue}` : null,
+      })),
+      subtotal: cart.items.reduce((s, i) => s + parseFloat(i.priceAtAdd) * i.quantity, 0),
+      totalItems: cart.items.reduce((s, i) => s + i.quantity, 0),
+      updatedAt: cart.updatedAt,
+      createdAt: cart.createdAt,
+    }));
+
+    const total = await prisma.cart.count({ where: { items: { some: {} } } });
+
+    return res.status(200).json({
+      success: true,
+      data,
+      pagination: { total, page: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)) },
+    });
+  } catch (error) {
+    console.error('getAbandonedCarts error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/** POST /admin/abandoned-carts/:cartId/send-reminder — email logged-in user only */
+const sendAbandonedCartReminder = async (req, res) => {
+  try {
+    const { cartId } = req.params;
+    const baseUrl = process.env.FRONTEND_URL || 'https://www.shopatkjn.com';
+    const waDigits = (process.env.WHATSAPP_NUMBER || process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || '919440658294').replace(/\D/g, '');
+    const whatsappUrl = `https://wa.me/${waDigits}?text=${encodeURIComponent('Hi, I need help with my cart on KJN Shop')}`;
+
+    const cart = await prisma.cart.findUnique({
+      where: { id: cartId },
+      include: {
+        user: { select: { id: true, name: true, email: true, phone: true } },
+        items: {
+          include: {
+            product: { select: { name: true, slug: true } },
+          },
+        },
+      },
+    });
+
+    if (!cart || !cart.items?.length) {
+      return res.status(404).json({ success: false, message: 'Cart not found or empty' });
+    }
+    const email = cart.user?.email?.trim();
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'No email on file for this cart (guest carts cannot receive email reminders)',
+      });
+    }
+
+    const items = cart.items.map((i) => {
+      const line = parseFloat(i.priceAtAdd) * i.quantity;
+      return {
+        name: i.product?.name || 'Product',
+        qty: i.quantity,
+        lineTotal: line.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      };
+    });
+
+    const cartUrl = `${baseUrl}/cart`;
+    await sendAbandonedCartReminderEmail(email, {
+      userName: cart.user?.name,
+      items,
+      cartUrl,
+      whatsappUrl,
+    });
+
+    return res.status(200).json({ success: true, message: 'Reminder email sent' });
+  } catch (error) {
+    console.error('sendAbandonedCartReminder error:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Failed to send email' });
+  }
+};
+
+module.exports = {
+  getDashboardStats,
+  getAllUsers,
+  getUserDetail,
+  getLowStockProducts,
+  updateStock,
+  getRevenueReport,
+  getAdminProducts,
+  getRevenueReportByCategory,
+  getAbandonedCarts,
+  sendAbandonedCartReminder,
+};
