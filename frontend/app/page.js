@@ -452,7 +452,7 @@ export default function HomePage() {
                     {/* Strobe flash */}
                     <div className="strobe-layer" />
                     {/* Full-slide FX: spotlight beams + sparkles + embers */}
-                    <FlashSaleFX />
+                    {/* <FlashSaleFX /> */}
                     {/* Drifting glowing orbs */}
                     <div className="absolute inset-0 overflow-hidden pointer-events-none" style={{ zIndex: 0 }}>
                       <div className="orb-a absolute -top-24 -right-24 w-96 h-96 rounded-full" style={{ background: 'radial-gradient(circle,rgba(255,109,0,.22) 0%,transparent 70%)' }} />
