@@ -1,15 +1,19 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, Eye, EyeOff, X, Package, Zap } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Plus, Search, Edit2, Eye, EyeOff, X, Package, Zap, Sparkles, Copy, Download, Upload, FileDown } from 'lucide-react';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
-import ImageUploader from '@/components/admin/ImageUploader';
+import MultiImageUploader from '@/components/admin/MultiImageUploader';
 
 const emptyForm = {
-  name: '', slug: '', sku: '', mrp: '', sellingPrice: '', gstPercent: '18',
-  stockQuantity: '', categoryId: '', brandId: '', image: '',
+  name: '', slug: '', sku: '', mrp: '', sellingPrice: '', gstType: 'IGST', gstPercent: '18', cessPercent: '0',
+  stockQuantity: '', categoryId: '', brandId: '', images: [],
   shortDescription: '', description: '', isActive: true, isFeatured: false,
-  specifications: []
+  specifications: [],
+  allowedPaymentMethods: ['COD', 'ONLINE'],
+  codAdvancePercent: '0',
+  googleMerchantCentre: false,
+  metaTitle: '', metaDescription: '',
 };
 
 function parseSpecs(specs) {
@@ -35,6 +39,9 @@ export default function AdminProducts() {
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [csvBusy, setCsvBusy] = useState(false);
+  const [dupId, setDupId] = useState(null);
+  const csvInputRef = useRef(null);
 
   useEffect(() => {
     fetchProducts();
@@ -88,18 +95,40 @@ export default function AdminProducts() {
       toast.error('Name, MRP and Selling Price are required');
       return;
     }
+    if (!form.categoryId) {
+      toast.error('Please select a category');
+      return;
+    }
+    if ((form.images || []).length > 6) {
+      toast.error('Maximum 6 images allowed');
+      return;
+    }
     setSaving(true);
     try {
-      const { specifications: specsArr, ...formRest } = form;
+      const { specifications: specsArr, images: formImages, ...formRest } = form;
+      const imagesPayload = (formImages || []).map((img) => {
+        if (img && typeof img === 'object') return img.url || img.image || '';
+        return img;
+      }).filter(Boolean);
+      const mainImage = imagesPayload[0] || null;
       const payload = {
         ...formRest,
+        image: mainImage, // keep compatibility; backend will also set main image from first gallery image
         mrp: parseFloat(form.mrp),
         sellingPrice: parseFloat(form.sellingPrice),
+        gstType: form.gstType || 'IGST',
         gstPercent: parseFloat(form.gstPercent || 18),
+        cessPercent: parseFloat(form.cessPercent || 0),
         stockQuantity: parseInt(form.stockQuantity || 0),
         categoryId: form.categoryId || null,
         brandId: form.brandId || null,
         specifications: serializeSpecs(specsArr),
+        allowedPaymentMethods: Array.isArray(form.allowedPaymentMethods) ? form.allowedPaymentMethods : ['COD', 'ONLINE'],
+        codAdvancePercent: parseFloat(form.codAdvancePercent || 0),
+        googleMerchantCentre: !!form.googleMerchantCentre,
+        metaTitle: form.metaTitle || null,
+        metaDescription: form.metaDescription || null,
+        images: imagesPayload,
       };
 
       if (editId) {
@@ -119,21 +148,135 @@ export default function AdminProducts() {
     } finally { setSaving(false); }
   };
 
-  const handleEdit = (p) => {
+  const downloadBlob = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportCsv = async () => {
+    setCsvBusy(true);
+    try {
+      const res = await api.get('/admin/products/export/csv', { responseType: 'blob' });
+      downloadBlob(res.data, `products-export-${Date.now()}.csv`);
+      toast.success('Export downloaded');
+    } catch (e) {
+      toast.error('Export failed');
+    } finally {
+      setCsvBusy(false);
+    }
+  };
+
+  const handleDownloadTemplate = async () => {
+    setCsvBusy(true);
+    try {
+      const res = await api.get('/admin/products/csv-template', { responseType: 'blob' });
+      downloadBlob(res.data, 'products-import-template.csv');
+      toast.success('Template downloaded');
+    } catch (e) {
+      toast.error('Template download failed');
+    } finally {
+      setCsvBusy(false);
+    }
+  };
+
+  const handleCsvFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setCsvBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await api.post('/admin/products/import/csv', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const { created, updated, errors } = res.data.data || {};
+      toast.success(res.data.message || 'Import done');
+      if (errors?.length) {
+        toast.error(`${errors.length} row(s) had issues — check server response`);
+        console.warn('CSV import errors', errors);
+      }
+      fetchProducts();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Import failed');
+    } finally {
+      setCsvBusy(false);
+    }
+  };
+
+  const handleDuplicate = async (product) => {
+    setDupId(product.id);
+    try {
+      await api.post(`/products/${product.id}/duplicate`);
+      toast.success('Product duplicated — edit the copy to adjust name/slug');
+      fetchProducts();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Duplicate failed');
+    } finally {
+      setDupId(null);
+    }
+  };
+
+  const handleGenerateDescription = async () => {
+    if (!form.name) {
+      toast.error('Enter product name first');
+      return;
+    }
+    try {
+      const res = await api.post('/products/generate-description', {
+        name: form.name,
+        shortDescription: form.shortDescription,
+        specifications: serializeSpecs(form.specifications),
+        categoryName: categories.find((c) => c.id === form.categoryId)?.name,
+        brandName: brands.find((b) => b.id === form.brandId)?.name,
+      });
+      const desc = res.data?.data?.description;
+      if (desc) setForm((f) => ({ ...f, description: desc }));
+      toast.success('Description generated');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to generate description');
+    }
+  };
+
+  const handleEdit = async (p) => {
     setForm({
       name: p.name || '', slug: p.slug || '', sku: p.sku || '',
       mrp: p.mrp || '', sellingPrice: p.sellingPrice || '',
-      gstPercent: p.gstPercent || '18',
-      stockQuantity: p.stockQuantity || '',
+      gstType: p.gstType || 'IGST',
+      gstPercent: p.gstPercent != null ? String(p.gstPercent) : '18',
+      cessPercent: p.cessPercent != null ? String(p.cessPercent) : '0',
+      stockQuantity: p.stockQuantity ?? '',
       categoryId: p.categoryId || '', brandId: p.brandId || '',
-      image: p.image || '',
+      images: [],
       shortDescription: p.shortDescription || '',
       description: p.description || '',
       isActive: p.isActive !== false, isFeatured: p.isFeatured || false,
-      specifications: parseSpecs(p.specifications)
+      specifications: parseSpecs(p.specifications),
+      allowedPaymentMethods: Array.isArray(p.allowedPaymentMethods) ? p.allowedPaymentMethods : ['COD', 'ONLINE'],
+      codAdvancePercent: p.codAdvancePercent != null ? String(p.codAdvancePercent) : '0',
+      googleMerchantCentre: !!p.googleMerchantCentre,
+      metaTitle: p.metaTitle || '', metaDescription: p.metaDescription || '',
     });
     setEditId(p.id);
     setShowForm(true);
+    try {
+      const res = await api.get(`/products/${p.slug}`);
+      const data = res.data?.data;
+      if (data?.images?.length) {
+        setForm((f) => ({
+          ...f,
+          images: data.images.map((img) => ({
+            id: img.id,
+            url: img.image,
+            isDefault: !!img.isPrimary,
+          })),
+        }));
+      }
+    } catch (_) { /* optional */ }
   };
 
   return (
@@ -144,13 +287,49 @@ export default function AdminProducts() {
           <h1 className="font-heading font-extrabold text-2xl text-gray-900">Products</h1>
           <p className="text-sm text-gray-600 mt-1">{products.length} total products</p>
         </div>
-        <button
-          onClick={() => { setForm(emptyForm); setEditId(null); setShowForm(true); }}
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary text-white rounded-xl font-semibold text-sm hover:bg-primary-900 transition-colors shadow-primary"
-        >
-          <Plus className="w-4 h-4" />
-          Add Product
-        </button>
+        <div className="flex flex-wrap items-center gap-2 justify-end">
+          <input
+            ref={csvInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={handleCsvFile}
+          />
+          <button
+            type="button"
+            disabled={csvBusy}
+            onClick={() => csvInputRef.current?.click()}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border-2 border-gray-200 text-gray-800 rounded-xl font-semibold text-sm hover:border-primary-800 transition-colors"
+          >
+            <Upload className="w-4 h-4" />
+            Import CSV
+          </button>
+          <button
+            type="button"
+            disabled={csvBusy}
+            onClick={handleDownloadTemplate}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border-2 border-gray-200 text-gray-800 rounded-xl font-semibold text-sm hover:border-primary-800 transition-colors"
+          >
+            <FileDown className="w-4 h-4" />
+            Template
+          </button>
+          <button
+            type="button"
+            disabled={csvBusy}
+            onClick={handleExportCsv}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border-2 border-gray-200 text-gray-800 rounded-xl font-semibold text-sm hover:border-primary-800 transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </button>
+          <button
+            onClick={() => { setForm(emptyForm); setEditId(null); setShowForm(true); }}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary text-white rounded-xl font-semibold text-sm hover:bg-primary-900 transition-colors shadow-primary"
+          >
+            <Plus className="w-4 h-4" />
+            Add Product
+          </button>
+        </div>
       </div>
 
       {/* Search */}
@@ -259,6 +438,14 @@ export default function AdminProducts() {
                     <Edit2 className="w-5 h-5 text-blue-600" />
                   </button>
                   <button
+                    onClick={() => handleDuplicate(product)}
+                    disabled={dupId === product.id}
+                    className="p-3 bg-white rounded-full hover:bg-purple-50 transition-colors disabled:opacity-50"
+                    title="Duplicate product"
+                  >
+                    <Copy className="w-5 h-5 text-purple-600" />
+                  </button>
+                  <button
                     onClick={() => handleToggle(product)}
                     className={`p-3 bg-white rounded-full transition-colors ${product.isActive ? 'hover:bg-amber-50' : 'hover:bg-green-50'}`}
                     title={product.isActive ? 'Hide from store' : 'Show in store'}
@@ -340,6 +527,13 @@ export default function AdminProducts() {
                     Edit
                   </button>
                   <button
+                    onClick={() => handleDuplicate(product)}
+                    disabled={dupId === product.id}
+                    className="flex-1 px-3 py-2 bg-purple-50 text-purple-700 rounded-lg font-semibold text-xs hover:bg-purple-100 transition-colors disabled:opacity-50"
+                  >
+                    {dupId === product.id ? '…' : 'Duplicate'}
+                  </button>
+                  <button
                     onClick={() => handleToggle(product)}
                     className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg font-semibold text-xs transition-colors ${
                       product.isActive
@@ -373,11 +567,10 @@ export default function AdminProducts() {
             </div>
 
             <form onSubmit={handleSave} className="space-y-4">
-              <ImageUploader
-                endpoint="product-image"
-                value={form.image}
-                onChange={(img) => setForm(f => ({ ...f, image: img }))}
-                label="Product Image"
+              <MultiImageUploader
+                images={form.images || []}
+                onChange={(images) => setForm(f => ({ ...f, images }))}
+                maxImages={6}
               />
 
               <div className="grid grid-cols-2 gap-4">
@@ -392,12 +585,12 @@ export default function AdminProducts() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">SKU</label>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">SKU (leave empty for auto SKU-1, SKU-2...)</label>
                   <input
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-primary-800 focus:ring-4 focus:ring-primary-100 transition-all"
                     value={form.sku}
                     onChange={(e) => setForm(f => ({ ...f, sku: e.target.value }))}
-                    placeholder="SKU123"
+                    placeholder="Auto"
                   />
                 </div>
               </div>
@@ -439,6 +632,106 @@ export default function AdminProducts() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">GST Type (e-commerce)</label>
+                  <select
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-primary-800 focus:ring-4 focus:ring-primary-100 transition-all"
+                    value={form.gstType}
+                    onChange={(e) => setForm(f => ({ ...f, gstType: e.target.value }))}
+                  >
+                    <option value="IGST">IGST</option>
+                    <option value="CGST_SGST">CGST + SGST</option>
+                    <option value="GST_CESS">GST + CESS</option>
+                    <option value="CGST_SGST_CESS">CGST + SGST + CESS</option>
+                  </select>
+                </div>
+                <div />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">GST %</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-primary-800 focus:ring-4 focus:ring-primary-100 transition-all"
+                    value={form.gstPercent}
+                    onChange={(e) => setForm(f => ({ ...f, gstPercent: e.target.value }))}
+                    placeholder="18"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">CESS % (GST + CESS)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-primary-800 focus:ring-4 focus:ring-primary-100 transition-all"
+                    value={form.cessPercent}
+                    onChange={(e) => setForm(f => ({ ...f, cessPercent: e.target.value }))}
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Payment options for this product</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={(form.allowedPaymentMethods || []).includes('COD')}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                          ? [...(form.allowedPaymentMethods || []).filter((x) => x !== 'COD'), 'COD']
+                          : (form.allowedPaymentMethods || []).filter((x) => x !== 'COD');
+                        setForm((f) => ({ ...f, allowedPaymentMethods: next.length ? next : ['ONLINE'] }));
+                      }}
+                      className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                    />
+                    <span className="text-sm font-semibold text-gray-700">COD</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={(form.allowedPaymentMethods || []).includes('ONLINE')}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                          ? [...(form.allowedPaymentMethods || []).filter((x) => x !== 'ONLINE'), 'ONLINE']
+                          : (form.allowedPaymentMethods || []).filter((x) => x !== 'ONLINE');
+                        setForm((f) => ({ ...f, allowedPaymentMethods: next.length ? next : ['COD'] }));
+                      }}
+                      className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                    />
+                    <span className="text-sm font-semibold text-gray-700">Online</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">COD advance % (amount to pay when ordering with COD)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-primary-800 focus:ring-4 focus:ring-primary-100 transition-all"
+                  value={form.codAdvancePercent}
+                  onChange={(e) => setForm(f => ({ ...f, codAdvancePercent: e.target.value }))}
+                  placeholder="0"
+                />
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.googleMerchantCentre}
+                  onChange={(e) => setForm(f => ({ ...f, googleMerchantCentre: e.target.checked }))}
+                  className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <span className="text-sm font-semibold text-gray-700">Show in Google Merchant Centre (when user searches product name in Google)</span>
+              </label>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">Category</label>
                   <select
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-primary-800 focus:ring-4 focus:ring-primary-100 transition-all"
@@ -467,7 +760,16 @@ export default function AdminProducts() {
               </div>
 
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Description</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-bold text-gray-700">Description</label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateDescription}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-800 rounded-lg font-semibold text-xs hover:bg-amber-200 transition-colors"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> Generate with AI
+                  </button>
+                </div>
                 <textarea
                   className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-primary-800 focus:ring-4 focus:ring-primary-100 transition-all resize-vertical"
                   rows="4"
@@ -475,6 +777,27 @@ export default function AdminProducts() {
                   onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))}
                   placeholder="Product description..."
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Meta Title (SEO)</label>
+                  <input
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-primary-800 focus:ring-4 focus:ring-primary-100 transition-all"
+                    value={form.metaTitle}
+                    onChange={(e) => setForm(f => ({ ...f, metaTitle: e.target.value }))}
+                    placeholder="Product name for search engines"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Meta Description (SEO)</label>
+                  <input
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-primary-800 focus:ring-4 focus:ring-primary-100 transition-all"
+                    value={form.metaDescription}
+                    onChange={(e) => setForm(f => ({ ...f, metaDescription: e.target.value }))}
+                    placeholder="Short description for Google"
+                  />
+                </div>
               </div>
 
               {/* Specifications */}

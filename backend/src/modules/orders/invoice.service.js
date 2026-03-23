@@ -267,15 +267,34 @@ async function generateInvoicePDF(order) {
             const labelRX = summaryRightX;
             const valueRX = rightEdge - 60;
 
+            const cessAmount = parseFloat(order.cessAmount || 0);
+            const advanceAmount = parseFloat(order.advanceAmount || 0);
+
+            const itemTaxTypes = new Set((order.items || []).map(i => (i.gstType || 'IGST').toUpperCase()));
+            const onlyCGSTSGST = itemTaxTypes.size === 1 && itemTaxTypes.has('CGST_SGST');
+
             const summaryRows = [
                 { label: 'Taxable Amount', value: taxableAmount.toFixed(2) },
-                { label: `IGST@18%`, value: gstAmount.toFixed(2) },
             ];
+
+            if (onlyCGSTSGST) {
+                const half = (gstAmount / 2);
+                summaryRows.push({ label: 'CGST', value: half.toFixed(2) });
+                summaryRows.push({ label: 'SGST', value: half.toFixed(2) });
+            } else {
+                summaryRows.push({ label: 'IGST', value: gstAmount.toFixed(2) });
+            }
+            if (cessAmount > 0) {
+                summaryRows.push({ label: 'CESS', value: cessAmount.toFixed(2) });
+            }
             if (shippingCharge > 0) {
                 summaryRows.push({ label: isCOD ? 'Cod Charges' : 'Shipping', value: shippingCharge.toFixed(2) });
             }
             if (discountAmount > 0) {
                 summaryRows.push({ label: 'Discount', value: `-${discountAmount.toFixed(2)}` });
+            }
+            if (advanceAmount > 0) {
+                summaryRows.push({ label: 'Advance (COD)', value: advanceAmount.toFixed(2) });
             }
 
             summaryRows.forEach(row => {

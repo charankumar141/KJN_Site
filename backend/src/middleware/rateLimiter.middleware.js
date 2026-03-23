@@ -1,12 +1,17 @@
 const rateLimit = require('express-rate-limit');
 
-// General API limit – bumped to a higher cap so bulk admin actions don't
-// trip the limiter.  You can also apply a separate `adminLimiter` after
-// authentication if you want to exempt admins completely.
+// General API limit – high cap so dev + admin (many parallel calls, image uploads) don’t hit 429.
+// Auth refresh is skipped so token rotation never blocks the user.
 exports.generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000,
+  max: Number(process.env.RATE_LIMIT_MAX || 10000),
+  standardHeaders: true,
+  legacyHeaders: false,
   message: { success: false, message: 'Too many requests, please try again later' },
+  skip: (req) => {
+    const url = req.originalUrl || req.url || '';
+    return url.includes('/auth/refresh');
+  },
 });
 
 // Admin-specific limiter (apply after protect/adminOnly middleware when

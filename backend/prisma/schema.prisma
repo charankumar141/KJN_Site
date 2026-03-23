@@ -32,6 +32,10 @@ model User {
   notifications Notification[]
   couponUsages  CouponUsage[]
   refundsInitiated Refund[]    @relation("RefundInitiatedBy")
+
+  // KJN coins
+  coinWallet       UserCoinWallet?
+  coinTransactions  CoinTransaction[]
 }
 
 enum Role {
@@ -93,7 +97,10 @@ model Product {
   brand            Brand?           @relation(fields: [brandId], references: [id])
   mrp              Decimal          @db.Decimal(10, 2)
   sellingPrice     Decimal          @db.Decimal(10, 2)
+  // GST type for ecommerce (affects invoice display; tax amount still comes from gstPercent/cessPercent)
+  gstType          String           @default("IGST") // IGST | CGST_SGST | GST_CESS | CGST_SGST_CESS
   gstPercent       Decimal          @default(18) @db.Decimal(5, 2)
+  cessPercent      Decimal          @default(0) @db.Decimal(5, 2)
   stockQuantity    Int              @default(0)
   isActive         Boolean          @default(true)
   isFeatured       Boolean          @default(false)
@@ -105,6 +112,12 @@ model Product {
   metaTitle        String?
   metaDescription  String?
   image            String?          @db.Text
+  // Payment: allowed methods for this product (e.g. ["COD","ONLINE"])
+  allowedPaymentMethods String[]    @default(["COD", "ONLINE"])
+  // COD advance: percentage of product price to pay upfront when ordering with COD
+  codAdvancePercent Decimal         @default(0) @db.Decimal(5, 2)
+  // Google Merchant Centre: when on, product appears in Google Shopping search
+  googleMerchantCentre Boolean       @default(false)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   images           ProductImage[]
@@ -176,6 +189,17 @@ model CollectionProduct {
   @@id([collectionId, productId])
 }
 
+// Admin-defined delivery estimate by pincode (distance-based estimate)
+model PincodeDelivery {
+  id              String   @id @default(uuid())
+  pincode         String   @unique
+  estimatedDays   Int      // min days for delivery
+  estimatedDaysMax Int?    // max days (optional)
+  isServiceable   Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
 model Cart {
   id        String     @id @default(uuid())
   userId    String?    @unique
@@ -183,6 +207,12 @@ model Cart {
   sessionId String?    @unique
   items     CartItem[]
   couponCode String?
+  // Coins redemption for checkout (KJN coins)
+  // coinsUsed is the amount the customer wants to redeem at checkout.
+  // Actual coinDiscount is capped by available balance + max eligible discount value.
+  coinsUsed Int       @default(0)
+  // Abandoned cart: snapshot of address/contact when user was on checkout but did not place order
+  checkoutSnapshot Json?   // { name, phone, line1, line2, city, state, pincode }
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 }
@@ -212,8 +242,10 @@ model Order {
   subtotal          Decimal       @db.Decimal(10, 2)
   discountAmount    Decimal       @default(0) @db.Decimal(10, 2)
   gstAmount         Decimal       @default(0) @db.Decimal(10, 2)
+  cessAmount        Decimal       @default(0) @db.Decimal(10, 2)
   shippingCharge    Decimal       @default(0) @db.Decimal(10, 2)
   totalAmount       Decimal       @db.Decimal(10, 2)
+  advanceAmount     Decimal       @default(0) @db.Decimal(10, 2)
   shippingAddressId String
   shippingAddress   Address       @relation(fields: [shippingAddressId], references: [id])
   notes             String?
@@ -263,8 +295,11 @@ model OrderItem {
   quantity     Int
   unitPrice    Decimal         @db.Decimal(10, 2)
   mrp          Decimal         @db.Decimal(10, 2)
+  gstType      String          @default("IGST")
   gstPercent   Decimal         @db.Decimal(5, 2)
+  cessPercent  Decimal         @default(0) @db.Decimal(5, 2)
   totalPrice   Decimal         @db.Decimal(10, 2)
+  advanceAmount Decimal        @default(0) @db.Decimal(10, 2)
 }
 
 model Wishlist {
@@ -379,6 +414,13 @@ model Notification {
   createdAt DateTime @default(now())
 }
 
+// Auto-increment counter for SKU (SKU-1, SKU-2, ...)
+model SkuSequence {
+  id        String   @id @default(uuid())
+  nextValue Int      @default(1)
+  updatedAt DateTime @updatedAt
+}
+
 model OTP {
   id        String   @id @default(uuid())
   key       String   @unique
@@ -461,4 +503,64 @@ enum RefundStatus {
   PENDING
   PROCESSED
   FAILED
+}
+
+// ─────────────────────────────────────────────
+// KJN COINS (wallet + ledger)
+// 1 coin = 1 rupee (fixed) for display/redemption mapping
+// ─────────────────────────────────────────────
+
+enum CoinTransactionType {
+  EARN
+  REDEEM
+  ADJUSTMENT
+}
+
+enum CoinTransactionSource {
+  NEW_USER
+  FESTIVAL
+  ADMIN_GRANT
+  SYSTEM
+}
+
+model CoinSettings {
+  id             String   @id @default("singleton")
+  newUserCoins  Int      @default(100)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model CoinFestivalPromo {
+  id          String   @id @default(uuid())
+  name        String
+  coinsAmount Int
+  startAt     DateTime
+  endAt       DateTime
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive, startAt, endAt])
+}
+
+model UserCoinWallet {
+  userId       String @unique
+  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance      Int    @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model CoinTransaction {
+  id          String              @id @default(uuid())
+  userId      String
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount      Int // signed integer: EARN positive, REDEEM negative
+  type        CoinTransactionType
+  source      CoinTransactionSource
+  reason      String?
+  meta        Json?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
 }

@@ -13,6 +13,9 @@ const { generalLimiter } = require('./middleware/rateLimiter.middleware');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Behind nginx / reverse proxy: correct client IP for rate limiting
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || 1));
+
 // Ensure public/uploads directory exists
 const uploadsDir = path.join(__dirname, '../public/uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });

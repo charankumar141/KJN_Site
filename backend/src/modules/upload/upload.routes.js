@@ -52,11 +52,13 @@ router.post('/product-image', upload.single('image'), async (req, res) => {
   }
 });
 
-// ── Multiple product images (up to 8) ────────────────────────
-router.post('/product-images', upload.array('images', 8), async (req, res) => {
+// ── Multiple product images (max 6 per product) ────────────────────────
+router.post('/product-images', upload.array('images', 6), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0)
       return res.status(400).json({ success: false, message: 'No images uploaded' });
+    if (req.files.length > 6)
+      return res.status(400).json({ success: false, message: 'Maximum 6 images allowed per product' });
 
     const results = await Promise.all(
       req.files.map(async (file) => ({

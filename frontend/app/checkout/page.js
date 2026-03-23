@@ -869,7 +869,7 @@ import {
   CheckCircle, Lock, ShoppingBag, Package,
   X, Home, Info,
   ArrowRight, Shield, RotateCcw, Zap, Tag,
-  Loader2, AlertCircle,
+  Loader2, AlertCircle, Coins,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -1003,7 +1003,7 @@ function SectionCard({ number, title, Icon, children, complete, summary }) {
 
 export default function CheckoutPage() {
   const router = useRouter();
-  const { cart, fetchCart, clearCart } = useCartStore();
+  const { cart, fetchCart, clearCart, applyCoins, removeCoins } = useCartStore();
   const { isAuthenticated, user }      = useAuthStore();
 
   const [addresses,       setAddresses]       = useState([]);
@@ -1014,6 +1014,9 @@ export default function CheckoutPage() {
   const [showAddForm,     setShowAddForm]     = useState(false);
   const [savingAddr,      setSavingAddr]      = useState(false);
   const [pincodeLoading,  setPincodeLoading]  = useState(false);
+  const [deliveryEstimate, setDeliveryEstimate] = useState(null);
+  const [coinsToRedeem, setCoinsToRedeem] = useState(0);
+  const [coinsApplying, setCoinsApplying] = useState(false);
   const [newAddress,      setNewAddress]      = useState({
     name: '', phone: '', line1: '', line2: '', city: '', state: '', pincode: '',
   });
@@ -1031,6 +1034,34 @@ export default function CheckoutPage() {
     };
     init().catch(() => setLoading(false));
   }, []);
+
+  // Keep coin input aligned with cart.coinsUsed
+  useEffect(() => {
+    if (!cart) return;
+    setCoinsToRedeem(parseInt(cart.coinsUsed ?? 0, 10) || 0);
+  }, [cart?.coinsUsed]);
+
+  // Save checkout address snapshot for abandoned cart (admin sees user + product + address)
+  useEffect(() => {
+    const addr = addresses.find(a => a.id === selectedAddress);
+    if (!addr) { setDeliveryEstimate(null); return; }
+    api.put('/cart/checkout-snapshot', {
+      name: addr.name,
+      phone: addr.phone,
+      line1: addr.line1,
+      line2: addr.line2 || '',
+      city: addr.city,
+      state: addr.state,
+      pincode: addr.pincode,
+    }).catch(() => {});
+    if (addr.pincode && addr.pincode.length === 6) {
+      api.get(`/shipping/check/${addr.pincode}`).then((r) => {
+        const d = r.data;
+        if (d.serviceable && d.estimatedDeliveryDate) setDeliveryEstimate(d.estimatedDeliveryDate);
+        else setDeliveryEstimate(d.estimatedDays != null ? { from: null, to: null, days: d.estimatedDays } : null);
+      }).catch(() => setDeliveryEstimate(null));
+    } else setDeliveryEstimate(null);
+  }, [selectedAddress, addresses]);
 
   // Pre-fill name & phone when form opens
   useEffect(() => {
@@ -1084,6 +1115,40 @@ export default function CheckoutPage() {
       toast.error(err.response?.data?.message || 'Failed to save address');
     } finally {
       setSavingAddr(false);
+    }
+  };
+
+  const handleApplyCoins = async () => {
+    const maxCoins = parseInt(cart?.coinBalance ?? 0, 10) || 0;
+    const v = parseInt(coinsToRedeem, 10);
+    if (!Number.isFinite(v) || v < 0) {
+      toast.error('Coins must be a non-negative integer');
+      return;
+    }
+    if (v > maxCoins) {
+      toast.error(`You can use at most ${maxCoins} coins`);
+      return;
+    }
+    setCoinsApplying(true);
+    try {
+      await applyCoins(v);
+      toast.success('Coins applied');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to apply coins');
+    } finally {
+      setCoinsApplying(false);
+    }
+  };
+
+  const handleRemoveCoins = async () => {
+    setCoinsApplying(true);
+    try {
+      await removeCoins();
+      toast.success('Coins removed');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to remove coins');
+    } finally {
+      setCoinsApplying(false);
     }
   };
 
@@ -1142,7 +1207,11 @@ export default function CheckoutPage() {
   };
 
   const selectedAddr  = addresses.find(a => a.id === selectedAddress);
-  const prepaidSaving = paymentMethod === 'ONLINE' ? Math.round((cart?.subtotal || 0) * 0.015) : 0;
+  const couponDiscount = Number(cart?.couponDiscount || 0);
+  const coinDiscount = Number(cart?.coinDiscount || 0);
+  const prepaidBase = Math.max(0, (cart?.subtotal || 0) - couponDiscount - coinDiscount);
+  const prepaidSaving = paymentMethod === 'ONLINE' ? Math.round(prepaidBase * 0.015) : 0;
+  const advanceAmount = Number(cart?.advanceAmount) || 0;
   const finalTotal    = Math.round((cart?.totalAmount || 0) - prepaidSaving);
 
   if (loading) return (
@@ -1361,6 +1430,21 @@ export default function CheckoutPage() {
                     })}
                   </div>
                 )}
+                {selectedAddr && deliveryEstimate && (
+                  <div className="mt-3 flex items-center gap-2 bg-primary-50 border border-primary-200 rounded-xl px-3 py-2">
+                    <Truck className="w-3.5 h-3.5 text-primary-700 flex-shrink-0" />
+                    <div>
+                      <p className="text-[10px] text-primary-600 font-semibold">Estimated delivery</p>
+                      <p className="text-xs font-bold text-primary-900">
+                        {deliveryEstimate.from && deliveryEstimate.to
+                          ? `${deliveryEstimate.from} – ${deliveryEstimate.to}`
+                          : deliveryEstimate.days != null
+                            ? `Delivery in ${deliveryEstimate.days}–${deliveryEstimate.days + 1} business days`
+                            : 'Delivery estimate available'}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </SectionCard>
 
               {/* 2. Payment Method */}
@@ -1450,6 +1534,62 @@ export default function CheckoutPage() {
                   </div>
                 )}
 
+                {(cart?.coinBalance ?? 0) > 0 && (
+                  <div className="mx-5 mt-3 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Coins className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] text-blue-700 font-semibold">Use KJN Coins</p>
+                        <p className="text-xs font-extrabold text-blue-900 tracking-wide">
+                          Available: {RS}{fmt(cart.coinBalance)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type="number"
+                        min={0}
+                        max={cart.coinBalance ?? 0}
+                        value={coinsToRedeem}
+                        onChange={(e) => setCoinsToRedeem(parseInt(e.target.value || '0', 10))}
+                        className="w-full px-2.5 py-2 text-xs border-2 border-blue-200 rounded-lg focus:border-primary-900 focus:outline-none transition-colors bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleApplyCoins}
+                        disabled={coinsApplying || coinsToRedeem <= 0}
+                        className="px-3 py-2 bg-primary-900 text-white text-xs font-extrabold rounded-lg hover:bg-primary-800 disabled:opacity-50"
+                      >
+                        {coinsApplying ? '...' : 'Apply'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRemoveCoins}
+                        disabled={coinsApplying || (cart?.coinsUsed ?? 0) <= 0}
+                        className="px-3 py-2 bg-white border-2 border-blue-200 text-blue-900 text-xs font-extrabold rounded-lg hover:border-blue-300 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-blue-700/80">
+                      Coins are capped by available balance and eligible cart discount.
+                    </p>
+                  </div>
+                )}
+
+                {cart.coinsUsed > 0 && cart.coinDiscount > 0 && (
+                  <div className="mx-5 mt-3 flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+                    <Coins className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] text-emerald-600 font-semibold">Coins applied</p>
+                      <p className="text-xs font-extrabold text-emerald-700 tracking-wide">
+                        {cart.coinsUsed} coins
+                      </p>
+                    </div>
+                    <span className="text-xs font-extrabold text-emerald-700">-{RS}{fmt(cart.coinDiscount)}</span>
+                  </div>
+                )}
+
                 <div className="px-5 py-4 space-y-3 max-h-56 overflow-y-auto">
                   {cart.items?.map(item => (
                     <div key={item.id} className="flex items-center gap-3">
@@ -1486,6 +1626,12 @@ export default function CheckoutPage() {
                       <span className="font-bold text-green-600">-{RS}{fmt(cart.couponDiscount)}</span>
                     </div>
                   )}
+                  {cart.coinDiscount > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-emerald-600 font-semibold">KJN Coins</span>
+                      <span className="font-bold text-emerald-600">-{RS}{fmt(cart.coinDiscount)}</span>
+                    </div>
+                  )}
                   {prepaidSaving > 0 && (
                     <div className="flex justify-between text-sm">
                       <span className="text-green-600 font-semibold">Prepaid Discount (1.5%)</span>
@@ -1502,14 +1648,26 @@ export default function CheckoutPage() {
                     <span className="text-gray-400 font-semibold">GST (included)</span>
                     <span className="text-gray-400 font-semibold">{RS}{Number(cart.gstAmount || 0).toFixed(2)}</span>
                   </div>
+                  {paymentMethod === 'COD' && advanceAmount > 0 && (
+                    <>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-amber-700 font-semibold">Advance (to pay now for COD)</span>
+                        <span className="font-bold text-amber-700">{RS}{fmt(advanceAmount)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs text-gray-500">
+                        <span>Pay on delivery</span>
+                        <span>{RS}{fmt(finalTotal - advanceAmount)}</span>
+                      </div>
+                    </>
+                  )}
                   <div className="border-t-2 border-gray-100 pt-3 flex justify-between items-center">
                     <span className="font-heading font-extrabold text-base text-gray-900">Total Payable</span>
                     <span className="font-heading font-extrabold text-xl text-primary-900">{RS}{fmt(finalTotal)}</span>
                   </div>
-                  {(cart.couponDiscount > 0 || prepaidSaving > 0) && (
+                  {(cart.couponDiscount > 0 || cart.coinDiscount > 0 || prepaidSaving > 0) && (
                     <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-2.5 text-center">
                       <p className="text-xs font-extrabold text-green-700">
-                        You save {RS}{fmt((cart.couponDiscount || 0) + prepaidSaving)} on this order!
+                        You save {RS}{fmt((cart.couponDiscount || 0) + (cart.coinDiscount || 0) + prepaidSaving)} on this order!
                       </p>
                     </div>
                   )}

@@ -25,6 +25,14 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config;
+    const url = original?.url || '';
+    // Avoid infinite loop if /auth/refresh itself returns 401
+    if (error.response?.status === 401 && url.includes('/auth/refresh')) {
+      localStorage.removeItem('accessToken');
+      useAuthStore.getState().logout();
+      if (typeof window !== 'undefined') window.location.href = '/login';
+      return Promise.reject(error);
+    }
     if (error.response?.status === 401 && !original._retry) {
       original._retry = true;
       try {
