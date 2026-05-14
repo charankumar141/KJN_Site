@@ -2,10 +2,13 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
+import useAuthStore from '@/store/useAuthStore';
 
 export default function MenuPage() {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [coinBalance, setCoinBalance] = useState(null);
+  const { isAuthenticated } = useAuthStore();
 
   useEffect(() => {
     api.get('/categories')
@@ -14,10 +17,25 @@ export default function MenuPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setCoinBalance(null);
+      return;
+    }
+    api.get('/user/coins')
+      .then((r) => setCoinBalance(parseInt(r.data?.data?.balance ?? 0, 10) || 0))
+      .catch(() => setCoinBalance(null));
+  }, [isAuthenticated]);
+
+  const RS = String.fromCharCode(8377);
+
   const quickLinks = [
     { label: 'Home', href: '/' },
     { label: 'My Orders', href: '/orders' },
     { label: 'My Account', href: '/account' },
+    ...(isAuthenticated
+      ? [{ label: coinBalance != null ? `KJN Coins (${RS}${Number(coinBalance).toLocaleString('en-IN')})` : 'KJN Coins', href: '/cart' }]
+      : []),
     { label: 'About Us', href: '/about-us' },
     { label: 'Blog', href: '/blog' },
     { label: 'Contact Us', href: '/contact-us' },

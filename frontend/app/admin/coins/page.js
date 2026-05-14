@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
+import { Coins, Plus, ToggleLeft, ToggleRight, Gift, Users } from 'lucide-react';
 import { Coins, Plus, ToggleLeft, ToggleRight, Gift } from 'lucide-react';
 
 export default function AdminCoinsPage() {
@@ -27,6 +28,9 @@ export default function AdminCoinsPage() {
     coinsAmount: '',
     reason: '',
   });
+
+  const [bulkForm, setBulkForm] = useState({ coinsAmount: '', reason: '' });
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   useEffect(() => {
     loadAll();
@@ -158,6 +162,29 @@ export default function AdminCoinsPage() {
     } catch (e) {
       console.error(e);
       toast.error(e.response?.data?.message || 'Balance lookup failed');
+    }
+  };
+
+  const grantAllCustomers = async () => {
+    try {
+      const coins = parseInt(bulkForm.coinsAmount, 10);
+      if (!Number.isFinite(coins) || coins <= 0) {
+        toast.error('coinsAmount must be a positive integer');
+        return;
+      }
+      setBulkLoading(true);
+      const res = await api.post('/admin/coins/grant-all', {
+        coinsAmount: coins,
+        reason: bulkForm.reason?.trim() || undefined,
+      });
+      toast.success(res.data?.message || 'Bulk grant completed');
+      setBulkForm({ coinsAmount: '', reason: '' });
+      await loadAll();
+    } catch (e) {
+      console.error(e);
+      toast.error(e.response?.data?.message || 'Bulk grant failed');
+    } finally {
+      setBulkLoading(false);
     }
   };
 
@@ -307,6 +334,48 @@ export default function AdminCoinsPage() {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4">
+        <div className="flex items-center gap-2 font-bold text-primary-900">
+          <Users className="w-5 h-5" />
+          Grant coins to all customers
+        </div>
+        <p className="text-sm text-gray-600">
+          Credits every account with role <strong>Customer</strong>. Logged-in shoppers will see the new balance in the site menu (KJN Coins) and at checkout.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Coins per customer</label>
+            <input
+              type="number"
+              value={bulkForm.coinsAmount}
+              onChange={(e) => setBulkForm((b) => ({ ...b, coinsAmount: e.target.value }))}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+              min={1}
+              placeholder="e.g. 50"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Reason (optional)</label>
+            <input
+              value={bulkForm.reason}
+              onChange={(e) => setBulkForm((b) => ({ ...b, reason: e.target.value }))}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+              placeholder="e.g. New Year bonus"
+            />
+          </div>
+          <div className="sm:col-span-2 flex justify-end">
+            <button
+              type="button"
+              disabled={bulkLoading}
+              onClick={grantAllCustomers}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-900 text-white rounded-xl text-sm font-semibold hover:bg-primary-800 disabled:opacity-60"
+            >
+              {bulkLoading ? 'Processing…' : 'Grant to all customers'}
+            </button>
+          </div>
         </div>
       </div>
 

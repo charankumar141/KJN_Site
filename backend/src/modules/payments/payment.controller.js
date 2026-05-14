@@ -24,11 +24,19 @@ const createPaymentOrder = async (req, res) => {
     if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
     if (order.paymentStatus === 'PAID') return res.status(400).json({ success: false, message: 'Order already paid' });
 
+    const adv = parseFloat(order.advanceAmount || 0);
+    const payRupees =
+      order.paymentMethod === 'COD' && adv > 0 ? adv : parseFloat(order.totalAmount);
+    const amountPaise = Math.round(payRupees * 100);
+    if (amountPaise < 100) {
+      return res.status(400).json({ success: false, message: 'Payment amount must be at least ₹1' });
+    }
+
     const razorpayOrder = await razorpay.orders.create({
-      amount: Math.round(parseFloat(order.totalAmount) * 100), // paise
+      amount: amountPaise,
       currency: 'INR',
       receipt: order.orderNumber,
-      notes: { orderId: order.id, userId },
+      notes: { orderId: order.id, userId, payType: order.paymentMethod === 'COD' && adv > 0 ? 'COD_ADVANCE' : 'FULL' },
     });
 
     await prisma.order.update({
@@ -81,12 +89,18 @@ const verifyPayment = async (req, res) => {
       include: { user: true, items: true, shippingAddress: true },
     });
 
+    const adv = parseFloat(order.advanceAmount || 0);
+    const paidLine =
+      order.paymentMethod === 'COD' && adv > 0
+        ? `COD advance of Rs.${adv} received for order #${order.orderNumber}. Balance is due on delivery.`
+        : `Payment of Rs.${order.totalAmount} received for order #${order.orderNumber}. We are processing your order.`;
+
     await prisma.notification.create({
       data: {
         userId: order.userId,
         type: 'PAYMENT_SUCCESS',
         title: 'Payment Successful!',
-        message: `Payment of Rs.${order.totalAmount} received for order #${order.orderNumber}. We are processing your order.`,
+        message: paidLine,
       },
     });
 
@@ -233,7 +247,9 @@ const initiateRefund = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Order has already been fully refunded' });
     }
 
-    const totalPaid = parseFloat(order.totalAmount);
+    const adv = parseFloat(order.advanceAmount || 0);
+    const totalPaid =
+      order.paymentMethod === 'COD' && adv > 0 ? adv : parseFloat(order.totalAmount);
     const refundAmount = amount ? Math.min(parseFloat(amount), totalPaid) : totalPaid;
     if (refundAmount <= 0) return res.status(400).json({ success: false, message: 'Refund amount must be greater than 0' });
 

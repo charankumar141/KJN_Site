@@ -115,18 +115,34 @@ const addressBlock = (addr, name) => {
 // ?? Template builders ??????????????????????????????????????????????????????
 
 function buildOrderPlacedEmail(order, userName) {
+  const adv = parseFloat(order.advanceAmount || 0);
+  const pendingCodAdvance =
+    order.paymentMethod === 'COD' && adv > 0 && order.paymentStatus === 'PENDING' && !order.paymentId;
+  const badge = pendingCodAdvance
+    ? statusBadge('Awaiting advance payment', '#E65100')
+    : statusBadge('Order Confirmed', BRAND_COLOR);
+  const intro = pendingCodAdvance
+    ? `<p style="margin:0 0 20px;font-size:15px;color:#6B7280;text-align:center;">Hi <strong>${userName}</strong>, your order is held until the COD advance is paid online.</p>
+       <div style="background:#FFF3E0;border-radius:10px;padding:16px 20px;margin:0 0 20px;text-align:center;">
+         <p style="margin:0;font-size:13px;color:#E65100;font-weight:700;">Pay Rs. ${fmt(adv)} now to confirm your Cash on Delivery order.</p>
+         <p style="margin:8px 0 0;font-size:12px;color:#6B7280;">The rest is payable when the order is delivered.</p>
+       </div>`
+    : `<p style="margin:0 0 20px;font-size:15px;color:#6B7280;text-align:center;">Hi <strong>${userName}</strong>, your order has been received and confirmed.</p>`;
+  const subject = pendingCodAdvance
+    ? `Complete payment - Order #${order.orderNumber} | KJN Shop`
+    : `Order Confirmed - #${order.orderNumber} | KJN Shop`;
   const body = `
   <tr><td style="padding:28px 32px;">
-    <div style="text-align:center;margin-bottom:16px;">${statusBadge('Order Confirmed', BRAND_COLOR)}</div>
+    <div style="text-align:center;margin-bottom:16px;">${badge}</div>
     <h2 style="margin:0 0 4px;font-size:22px;color:#111827;text-align:center;">Thank You For Your Order!</h2>
-    <p style="margin:0 0 20px;font-size:15px;color:#6B7280;text-align:center;">Hi <strong>${userName}</strong>, your order has been received and confirmed.</p>
+    ${intro}
     ${orderSummaryBox(order)}
     ${itemsTable(order.items)}
     ${addressBlock(order.shippingAddress, order.shippingAddress?.name || userName)}
     ${ctaButton('Track Your Order', `${SITE_URL}/orders/${order.id}`)}
     <p style="font-size:13px;color:#6B7280;text-align:center;">We will send you updates as your order progresses.</p>
   </td></tr>`;
-  return { subject: `Order Confirmed - #${order.orderNumber} | KJN Shop`, html: shell(body) };
+  return { subject, html: shell(body) };
 }
 
 function buildOrderProcessingEmail(order, userName) {

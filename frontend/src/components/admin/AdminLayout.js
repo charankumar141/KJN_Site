@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Package, ShoppingBag, Users, Tag, ImageIcon,
   FileText, Menu, LogOut, Layers, Zap, Bell, TrendingUp, BarChart3,
-  ChevronDown, Boxes, X, ChevronRight, Star, MessageSquare, RotateCcw, CreditCard
+  ChevronDown, Boxes, X, ChevronRight, Star, MessageSquare, RotateCcw, CreditCard, Coins
 } from 'lucide-react';
 import useAuthStore from '@/store/useAuthStore';
 import toast from 'react-hot-toast';
@@ -33,6 +33,7 @@ const navItems = [
       { label: 'Reports (CSV)', href: '/admin/reports', icon: FileText },
       { label: 'Abandoned Carts', href: '/admin/abandoned-carts', icon: ShoppingBag },
       { label: 'Payments',    href: '/admin/payments',    icon: CreditCard },
+      { label: 'KJN Coins',   href: '/admin/coins',       icon: Coins },
     ]
   },
   { label: 'Pincode Delivery', href: '/admin/pincode-delivery', icon: Package },
