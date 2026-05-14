@@ -76,6 +76,7 @@ router.get('/coins/festivals', coinsController.listFestivalPromos);
 router.post('/coins/festivals', coinsController.createFestivalPromo);
 router.put('/coins/festivals/:id', coinsController.setFestivalPromoActive);
 router.post('/coins/grant', coinsController.grantCoins);
+router.post('/coins/grant-all', coinsController.grantCoinsAllCustomers);
 router.get('/coins/balance', coinsController.getCoinBalance);
 
 // Flash Sales

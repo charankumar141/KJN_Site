@@ -1,5 +1,9 @@
 const prisma = require('../../config/db');
-const { awardCoinsForNewUser, grantCoinsToUser } = require('../coins/coin.service');
+const {
+  awardCoinsForNewUser,
+  grantCoinsToUser,
+  grantCoinsToAllCustomers: bulkGrantCoinsToAllCustomers,
+} = require('../coins/coin.service');
 
 async function getUserByIdentifier({ userId, email, phone }) {
   if (userId) return prisma.user.findUnique({ where: { id: userId } });
@@ -129,6 +133,22 @@ const grantCoins = async (req, res) => {
   }
 };
 
+// POST /api/admin/coins/grant-all  { coinsAmount, reason? }
+const grantCoinsAllCustomers = async (req, res) => {
+  try {
+    const { coinsAmount, reason } = req.body;
+    const result = await bulkGrantCoinsToAllCustomers({
+      amount: coinsAmount,
+      reason: reason || 'Admin bonus — all customers',
+      source: 'ADMIN_BULK_GRANT',
+    });
+    return res.status(200).json({ success: true, data: result, message: `Coins granted to ${result.succeeded} of ${result.totalUsers} customers` });
+  } catch (e) {
+    console.error('grantCoinsAllCustomers error:', e);
+    return res.status(400).json({ success: false, message: e.message || 'Bulk grant failed' });
+  }
+};
+
 // GET /api/admin/coins/balance?userId=&email=&phone=
 const getCoinBalance = async (req, res) => {
   try {
@@ -176,6 +196,7 @@ module.exports = {
   createFestivalPromo,
   setFestivalPromoActive,
   grantCoins,
+  grantCoinsAllCustomers,
   getCoinBalance,
   reawardCoinsForUser,
 };

@@ -7,6 +7,7 @@ import {
   ChevronDown, ChevronRight, Bell, LogOut,
   Package, Settings, Tag, Layers, Zap, Home,
   FileText, Shield, RotateCcw, Truck, CreditCard,
+  Coins,
 } from 'lucide-react';
 import useAuthStore from '@/store/useAuthStore';
 import useCartStore from '@/store/useCartStore';
@@ -22,6 +23,7 @@ const NAV_LINKS = [
 const MORE_LINKS = [
   { label: 'My Account',        href: '/account',          icon: User    },
   { label: 'My Orders',         href: '/orders',           icon: Package },
+  { label: 'KJN Coins',         href: '/cart',             icon: Coins   },
   { label: 'About Us',          href: '/about-us',         icon: Layers  },
   { label: 'Blog',              href: '/blog',             icon: Tag     },
   { label: 'Contact Us',        href: '/contact-us',       icon: Bell    },
@@ -49,6 +51,7 @@ export default function Navbar() {
   const [catOpen,       setCatOpen]       = useState(false);
   const [moreOpen,      setMoreOpen]      = useState(false);
   const [accountOpen,   setAccountOpen]   = useState(false);
+  const [coinBalance,   setCoinBalance]   = useState(null);
 
   const { user, isAuthenticated, logout } = useAuthStore();
   const { cart, fetchCart }               = useCartStore();
@@ -80,6 +83,21 @@ export default function Navbar() {
     fetchCart();
     api.get('/categories?limit=24').then(r => setCategories(r.data.data || [])).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setCoinBalance(null);
+      return;
+    }
+    const load = () => {
+      api.get('/user/coins').then((r) => {
+        setCoinBalance(parseInt(r.data?.data?.balance ?? 0, 10) || 0);
+      }).catch(() => setCoinBalance(null));
+    };
+    load();
+    window.addEventListener('focus', load);
+    return () => window.removeEventListener('focus', load);
+  }, [isAuthenticated, pathname]);
 
   /* search with debounce */
   useEffect(() => {
@@ -233,12 +251,17 @@ export default function Navbar() {
                 </button>
                 {moreOpen && (
                   <div className="absolute top-[calc(100%+8px)] right-0 w-56 bg-white rounded-2xl shadow-2xl border border-gray-100 z-50 overflow-hidden py-1">
-                    {MORE_LINKS.map(item => (
-                      <Link key={item.href} href={item.href}
+                    {MORE_LINKS.filter((item) => item.label !== 'KJN Coins' || isAuthenticated).map((item) => (
+                      <Link key={item.href + item.label} href={item.href}
                         onClick={() => setMoreOpen(false)}
-                        className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 hover:text-primary-900 transition-colors">
-                        <item.icon className="w-4 h-4 text-gray-400" />
-                        {item.label}
+                        className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 hover:text-primary-900 transition-colors">
+                        <span className="flex items-center gap-3 min-w-0">
+                          <item.icon className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                          <span className="truncate">{item.label}</span>
+                        </span>
+                        {item.label === 'KJN Coins' && coinBalance != null && (
+                          <span className="text-xs font-extrabold text-amber-700 flex-shrink-0">{RS}{Number(coinBalance).toLocaleString('en-IN')}</span>
+                        )}
                       </Link>
                     ))}
                     <div className="border-t border-gray-100 mt-1 pt-1">
@@ -315,6 +338,12 @@ export default function Navbar() {
                       <div className="px-4 py-3 bg-gradient-to-r from-primary-900 to-green-700 text-white">
                         <p className="font-extrabold text-sm">{user?.name}</p>
                         <p className="text-xs text-white/70 truncate">{user?.email || user?.phone}</p>
+                        {coinBalance != null && (
+                          <p className="mt-2 flex items-center gap-1.5 text-xs font-bold text-amber-200">
+                            <Coins className="w-3.5 h-3.5 flex-shrink-0" />
+                            KJN Coins: {RS}{Number(coinBalance).toLocaleString('en-IN')}
+                          </p>
+                        )}
                       </div>
                       <div className="py-1">
                         {[
@@ -447,6 +476,12 @@ export default function Navbar() {
                   <div>
                     <p className="font-bold text-sm text-gray-900">{user?.name}</p>
                     <p className="text-xs text-gray-500">{user?.email || user?.phone}</p>
+                    {coinBalance != null && (
+                      <p className="mt-1.5 flex items-center gap-1 text-xs font-extrabold text-amber-700">
+                        <Coins className="w-3.5 h-3.5" />
+                        {RS}{Number(coinBalance).toLocaleString('en-IN')} in coins
+                      </p>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -509,11 +544,16 @@ export default function Navbar() {
               {/* More links */}
               <div className="px-4 py-2 border-t border-gray-100">
                 <p className="text-xs font-extrabold uppercase tracking-widest text-gray-400 px-2 py-2">More</p>
-                {MORE_LINKS.map(item => (
-                  <Link key={item.href} href={item.href}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 hover:text-primary-900 transition-colors mb-0.5">
-                    <item.icon className="w-4 h-4 text-gray-400" />
-                    {item.label}
+                {MORE_LINKS.filter((item) => item.label !== 'KJN Coins' || isAuthenticated).map(item => (
+                  <Link key={item.href + item.label} href={item.href}
+                    className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 hover:text-primary-900 transition-colors mb-0.5">
+                    <span className="flex items-center gap-3 min-w-0">
+                      <item.icon className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </span>
+                    {item.label === 'KJN Coins' && coinBalance != null && (
+                      <span className="text-xs font-extrabold text-amber-700 flex-shrink-0">{RS}{Number(coinBalance).toLocaleString('en-IN')}</span>
+                    )}
                   </Link>
                 ))}
               </div>

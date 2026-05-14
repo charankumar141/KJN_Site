@@ -257,4 +257,18 @@ const markNotificationsRead = async (req, res) => {
   }
 };
 
-module.exports = { getProfile, updateProfile, getAddresses, addAddress, updateAddress, deleteAddress, getWishlist, toggleWishlist, getNotifications, markNotificationsRead, sendEmailChangeOTP, verifyEmailChangeOTP };
+// GET /api/user/coins — current user's KJN coin balance (1 coin ? ?1 at checkout)
+const getMyCoinBalance = async (req, res) => {
+  try {
+    const wallet = await prisma.userCoinWallet.findUnique({ where: { userId: req.user.id } });
+    return res.status(200).json({
+      success: true,
+      data: { balance: parseInt(wallet?.balance ?? 0, 10) || 0 },
+    });
+  } catch (error) {
+    console.error('getMyCoinBalance error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+module.exports = { getProfile, updateProfile, getAddresses, addAddress, updateAddress, deleteAddress, getWishlist, toggleWishlist, getNotifications, markNotificationsRead, sendEmailChangeOTP, verifyEmailChangeOTP, getMyCoinBalance };

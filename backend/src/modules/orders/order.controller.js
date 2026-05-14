@@ -125,6 +125,9 @@ const placeOrder = async (req, res) => {
 
     const totalAmount = subtotal - discountAmount + shippingCharge;
 
+    const advanceTotal = parseFloat(advanceAmount.toFixed(2));
+    const codNeedsOnlineAdvance = paymentMethod === 'COD' && advanceTotal > 0;
+
     const generatedOrderNumber = generateOrderNumber();
 
     // Create order with transaction
@@ -142,11 +145,12 @@ const placeOrder = async (req, res) => {
           discountAmount: parseFloat(discountAmount.toFixed(2)),
           gstAmount: parseFloat(gstAmount.toFixed(2)),
           cessAmount: parseFloat(cessAmount.toFixed(2)),
-          advanceAmount: parseFloat(advanceAmount.toFixed(2)),
+          advanceAmount: advanceTotal,
           shippingCharge: parseFloat(shippingCharge.toFixed(2)),
           totalAmount: parseFloat(totalAmount.toFixed(2)),
-          status: paymentMethod === 'COD' ? 'CONFIRMED' : 'PENDING',
-          paymentStatus: paymentMethod === 'COD' ? 'PENDING' : 'PENDING',
+          // COD with product advance %: stay PENDING until customer pays advance online (same as prepaid flow)
+          status: paymentMethod === 'COD' && !codNeedsOnlineAdvance ? 'CONFIRMED' : 'PENDING',
+          paymentStatus: 'PENDING',
           items: { create: orderItems },
         },
         include: { items: true, shippingAddress: true },
@@ -236,6 +240,8 @@ const placeOrder = async (req, res) => {
         orderId: order.id,
         orderNumber: order.orderNumber,
         totalAmount: parseFloat(order.totalAmount),
+        advanceAmount: parseFloat(order.advanceAmount || 0),
+        needsOnlineAdvancePayment: codNeedsOnlineAdvance,
         status: order.status,
         paymentMethod: order.paymentMethod,
       },
