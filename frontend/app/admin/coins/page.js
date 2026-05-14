@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import { Coins, Plus, ToggleLeft, ToggleRight, Gift, Users } from 'lucide-react';
+import { Coins, Plus, ToggleLeft, ToggleRight, Gift } from 'lucide-react';
 
 export default function AdminCoinsPage() {
   const [festivals, setFestivals] = useState([]);

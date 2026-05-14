@@ -4,6 +4,7 @@ const {
   grantCoinsToUser,
   grantCoinsToAllCustomers: bulkGrantCoinsToAllCustomers,
 } = require('../coins/coin.service');
+const { awardCoinsForNewUser, grantCoinsToUser } = require('../coins/coin.service');
 
 async function getUserByIdentifier({ userId, email, phone }) {
   if (userId) return prisma.user.findUnique({ where: { id: userId } });

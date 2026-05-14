@@ -1688,6 +1688,21 @@ export default function CheckoutPage() {
                         <span className="font-heading font-extrabold text-xl text-primary-900">{RS}{fmt(finalTotal)}</span>
                       </div>
                     )}
+                  {paymentMethod === 'COD' && advanceAmount > 0 && (
+                    <>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-amber-700 font-semibold">Advance (to pay now for COD)</span>
+                        <span className="font-bold text-amber-700">{RS}{fmt(advanceAmount)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs text-gray-500">
+                        <span>Pay on delivery</span>
+                        <span>{RS}{fmt(finalTotal - advanceAmount)}</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="border-t-2 border-gray-100 pt-3 flex justify-between items-center">
+                    <span className="font-heading font-extrabold text-base text-gray-900">Total Payable</span>
+                    <span className="font-heading font-extrabold text-xl text-primary-900">{RS}{fmt(finalTotal)}</span>
                   </div>
                   {(cart.couponDiscount > 0 || cart.coinDiscount > 0 || prepaidSaving > 0) && (
                     <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-2.5 text-center">

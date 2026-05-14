@@ -146,6 +146,7 @@ const placeOrder = async (req, res) => {
           gstAmount: parseFloat(gstAmount.toFixed(2)),
           cessAmount: parseFloat(cessAmount.toFixed(2)),
           advanceAmount: advanceTotal,
+          advanceAmount: parseFloat(advanceAmount.toFixed(2)),
           shippingCharge: parseFloat(shippingCharge.toFixed(2)),
           totalAmount: parseFloat(totalAmount.toFixed(2)),
           // COD with product advance %: stay PENDING until customer pays advance online (same as prepaid flow)

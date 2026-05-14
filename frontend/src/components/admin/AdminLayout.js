@@ -37,6 +37,7 @@ const navItems = [
     ]
   },
   { label: 'Pincode Delivery', href: '/admin/pincode-delivery', icon: Package },
+  { label: 'KJN Coins', href: '/admin/coins', icon: CreditCard },
   { label: 'Customers', href: '/admin/customers', icon: Users },
   { label: 'Reviews', href: '/admin/reviews', icon: Star },
   { label: 'Contact Messages', href: '/admin/contact-messages', icon: MessageSquare },
